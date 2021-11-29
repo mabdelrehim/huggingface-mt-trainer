@@ -46,6 +46,7 @@ from transformers.file_utils import get_full_repo_name
 from transformers.utils.versions import require_version
 from data.translation_dataset import TranslationDataset
 
+
 import numpy as np
 
 
@@ -155,6 +156,12 @@ def parse_args():
     action="store_true",
     help="If passed, will use a slow tokenizer (not backed by the 🤗 Tokenizers library).",
   )
+
+  parser.add_argument(
+    "--save_pretrained",
+    action="store_true",
+    help="If passed, it will save the model to [--output_dir] after each validation).",
+  )
   
   parser.add_argument(
     "--learning_rate",
@@ -245,11 +252,24 @@ def main():
     args.encoder_model_name, 
     args.decoder_model_name, 
   )
+  ## only for helsinki models
+  if "Helsinki" in args.encoder_model_name:
+    model.encoder = model.encoder.encoder
+  if "Helsinki" in args.decoder_model_name:
+    model.decoder = model.decoder.model.decoder
   for param in model.encoder.parameters():
     param.requires_grad = False
 
+  encoder_parameters = sum(p.numel() for p in model.encoder.parameters())
+  decoder_parameters = sum(p.numel() for p in model.decoder.parameters())
+  trainable_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+  total_parameters = sum(p.numel() for p in model.parameters())
+
   input_tokenizer = AutoTokenizer.from_pretrained(args.input_tokenizer_name, use_fast=not args.use_slow_tokenizer)
   output_tokenizer = AutoTokenizer.from_pretrained(args.output_tokenizer_name, use_fast=not args.use_slow_tokenizer)
+
+  logging.info(f"Input tokenizer = {input_tokenizer}")
+  logging.info(f"Output tokenizer = {output_tokenizer}")
 
 
   train_dataset = TranslationDataset(
@@ -340,6 +360,8 @@ def main():
   # Train!
   effective_max_tokens = args.max_tokens * accelerator.num_processes * args.gradient_accumulation_steps
 
+
+
   logger.info("***** Running training *****")
   logger.info(f"  Num examples = {len(train_dataset)}")
   logger.info(f"  Num Epochs = {args.num_train_epochs}")
@@ -347,6 +369,10 @@ def main():
   logger.info(f"  Total train effective max tokens per batch (w. parallel, distributed & accumulation) = {effective_max_tokens}")
   logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
   logger.info(f"  Total optimization steps = {args.max_train_steps}")
+  logger.info(f"  Encoder parameters = {encoder_parameters}")
+  logger.info(f"  Decoder parameters = {decoder_parameters}")
+  logger.info(f"  Trainable parameters = {trainable_parameters}")
+  logger.info(f"  Total parameters = {total_parameters}")
   # Only show the progress bar once on each machine.
   progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
   completed_steps = 0
@@ -361,7 +387,7 @@ def main():
       target_tokens = batch['target']
       source_masks = batch['source_mask']
       target_masks = batch['target_mask']
-      lm_labels = target_masks.clone()
+      lm_labels = target_tokens.clone()
       outputs = model(
         input_ids=source_tokens, 
         attention_mask=source_masks,
@@ -388,6 +414,7 @@ def main():
 
     model.eval()
 
+    logger.info("Evaluating model ..")
 
     gen_kwargs = {
       "max_length": args.max_sequence_length,
@@ -428,7 +455,8 @@ def main():
     #            commit_message=f"Training in progress epoch {epoch}", blocking=False, auto_lfs_prune=True
     #        )
 
-  if args.output_dir is not None:
+  if args.output_dir is not None and args.save_prerained:
+    logger.info("Saving model ..")
     accelerator.wait_for_everyone()
     unwrapped_model = accelerator.unwrap_model(model)
     unwrapped_model.save_pretrained(args.output_dir, save_function=accelerator.save)

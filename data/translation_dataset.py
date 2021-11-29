@@ -98,18 +98,27 @@ class TranslationDataset(IterableDataset):
       
       source_sentence = self.dataset["train"][batch_idx[i]][self.src_lang]
       source_sentence = [self.input_tokenizer.convert_tokens_to_ids(token) for token in source_sentence.split(" ")]
+      
       source_sentence = source_sentence[:self.max_sequence_length - 2]
-      source_sentence = [self.input_tokenizer.bos_token_id] + source_sentence + [self.input_tokenizer.eos_token_id]
+      if hasattr(self.input_tokenizer, 'bos_token_id') and self.input_tokenizer.bos_token_id is not None:
+        source_sentence = [self.input_tokenizer.bos_token_id] + source_sentence
+      if hasattr(self.input_tokenizer, 'eos_token_id') and self.input_tokenizer.eos_token_id is not None:
+        source_sentence = source_sentence + [self.input_tokenizer.eos_token_id]
+      
       source_sentences.append(source_sentence)
       max_toks += len(source_sentence)
 
       target_sentence = self.dataset["train"][batch_idx[i]][self.tgt_lang]   
       target_sentence = [self.target_tokenizer.convert_tokens_to_ids(token) for token in target_sentence.split(" ")]
+      
       target_sentence = target_sentence[:self.max_sequence_length - 2]
-      target_sentence = [self.target_tokenizer.bos_token_id] + target_sentence + [self.target_tokenizer.eos_token_id] 
+      if self.target_tokenizer.bos_token_id is not None:
+        target_sentence = [self.target_tokenizer.bos_token_id] + target_sentence
+      if self.target_tokenizer.eos_token_id is not None:
+        target_sentence = target_sentence + [self.target_tokenizer.eos_token_id] 
+      
       target_sentences.append(target_sentence)
       
-
     source_sentences = self.input_tokenizer.pad(
          {'input_ids': source_sentences}, 
          return_tensors="pt", 
